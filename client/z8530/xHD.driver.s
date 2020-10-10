@@ -1,54 +1,166 @@
-*=================================================
+*==============================================================================
 * xHD serial driver
 * By John Brooks 10/28/2015
 * Virtual disk drive based on ideas from Terence J. Boldt
-* Bodged into a GSOS Driver by Jason Andersen 10/10/2020 
-*=================================================
+* Bodged into a GSOS Driver by Jason Andersen 10/10/2020
+*
+* Note from Jason:
+* 	Uses Merlin 1.1.10, and CADIUS
+*
+*  See GSOS / Driver Driver Reference Manual
+*
+*  Brutal Deluxe also as an example Device Driver in their MountIt Project!
+* 
+*==============================================================================
 			lst		off
 
-			typ		bin
-			dsk		xHD
 
-ZpPageNum	=		$3a
-ZpChecksum	=		$3b
-ZpReadEnd	=		$3c
-ZpTemp		=		$3e
+maxDRIVES	equ		2
 
-ZpDrvrCmd	=		$42
-ZpDrvrUnit	=		$43
-ZpDrvrBufPtr =		$44
-ZpDrvrBlk	=		$46
+			typ		$BB				; DVR -  Apple IIgs Device Driver File
+			aux		$0102			; Active + GSOS Driver + Max 2 Device
+			rel						; OMF Code
 
-P8ErrIoErr	=		$27
-
-TxtLight	=		$e00427
+			dsk		xHD.driver
 
 
-P8CmdQuit	=		$65
+*------------------------------------------------------------------------------
 
-P8Mli		=		$BF00
-P8DevCnt	=		$BF31
-P8DevLst	=		$BF32
+nullptr equ 0
 
-IoSccCmdB	=		$C038
-IoSccCmdA	=		$C039
-IoSccDataB	=		$C03A
-IoSccDataA	=		$C03B
+;
+; $$JGA TODO, fix these 
+;
+;ZpPageNum	=		$3a
+;ZpChecksum	=		$3b
+;ZpReadEnd	=		$3c
+;ZpTemp		=		$3e
+;
+;ZpDrvrCmd	=		$42
+;ZpDrvrUnit	=		$43
+;ZpDrvrBufPtr =		$44
+;ZpDrvrBlk	=		$46
+;
+;P8ErrIoErr	=		$27
+;
+;TxtLight	=		$e00427
+;
+;
+;P8CmdQuit	=		$65
+;
+;P8Mli		=		$BF00
+;P8DevCnt	=		$BF31
+;P8DevLst	=		$BF32
+;
+;IoSccCmdB	=		$C038
+;IoSccCmdA	=		$C039
+;IoSccDataB	=		$C03A
 
-IoRomIn		=		$C081
-IoLcBank2	=		$C08B
+;IoSccDataA	=		$C03B
+;
+;IoRomIn		=		$C081
+;
+;RomStrOut	=		$DB3A		;YA=C string
 
-RomStrOut	=		$DB3A		;YA=C string
+*------------------------------------------------------------------------------
 
-*-------------------------------------------------
+Header		mx %00
+			da		FirstDIB-Header
+			dw		maxDRIVES
+			da		ConfigurationList0-Header
+			da		ConfigurationList1-Header
 
-			org		$2000
-Start
+;
+; $$JGA TODO - Support Configuration, for now empty
+;
+ConfigurationList0
+			dw		0	; Live Configuration
+			dw		0	; Default Configuration
+
+ConfigurationList1
+			dw		0	; Live Configuration
+			dw		0	; Default Configuration
+
+;
+; Device Information Blocks
+;
+FirstDIB
+DIB0
+			adrl	DIB1			; Pointer to next DIB
+			adrl	DriverEntry
+			dw		$00E0			; Speed = SLOW + Block + Read + Write
+			adrl	$0000FFFF  		; Blocks on Device
+			str		'xHDD1'
+			dw		$8001			; Slot 1, doesn't need Slot HW
+			dw		$0001			; Unit #
+			dw		$000D			; Version Development
+			dw		$0013			; Device ID = Generic HDD
+			dw		$0000			; Head Link
+			dw		$0000			; Forward Link
+			adrl	nullptr			; ExtendedDIB - User Data Pointer
+			dw		$0000			; DIB DevNum
+
+DIB1
+			adrl	nullptr			; Pointer to the next DIB
+			adrl	DriverEntry
+			dw		$00E0			; Speed = SLOW + Block + Read + Write
+			adrl	$0000FFFF  		; Blocks on Device
+			str		'xHDD2'
+			dw		$8001			; Slot 1, doesn't need Slot HW
+			dw		$0002			; Unit #
+			dw		$000D			; Version Development
+			dw		$0013			; Device ID = Generic HDD
+			dw		$0000			; Head Link
+			dw		$0000			; Forward Link
+			adrl	nullptr			; ExtendedDIB - User Data Pointer
+			dw		$0000			; DIB DevNum
+
+DriverEntry mx %00
+			cmp		#JUMP_TABLE_SIZE
+			bcs		:error_rtl
+
+			phk
+			plb
+
+			asl
+			tax
+
+			jmp		(:dispatch,x)
+
+:dispatch	da		Driver_Startup
+			da    	Driver_Open
+			da    	Driver_Read
+			da		Driver_Write
+			da		Driver_Close
+			da		Driver_Status
+			da		Driver_Control
+			da		Driver_Flush
+			da		Driver_Shutdown
+
+:error_rtl
+			lda 	#32		; Brutal Deluxe Returns this, invalid Driver Call
+			rtl
+
+*------------------------------------------------------------------------------
+
+Driver_Startup mx %00
+Driver_Open mx %00
+Driver_Close mx %00
+Driver_Shutdown mx %00
+Driver_Flush mx %00
+			lda		#0
+			clc
+			rtl
+
+Driver_Read mx %00
+Driver_Write mx %00
+Driver_Status mx %00
+Driver_Control mx %00
+
+
+
 
 :MoveE0Driver
-			lda		IoLcBank2
-			lda		IoLcBank2
-
 			; Copy E0Driver
 			clc
 			xce
