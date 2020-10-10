@@ -2,6 +2,7 @@
 * xHD serial driver
 * By John Brooks 10/28/2015
 * Virtual disk drive based on ideas from Terence J. Boldt
+*
 * Bodged into a GSOS Driver by Jason Andersen 10/10/2020
 *
 * Note from Jason:
@@ -13,7 +14,7 @@
 * 
 *==============================================================================
 			lst		off
-
+										h
 
 maxDRIVES	equ		2
 
@@ -90,7 +91,7 @@ DIB0
 			adrl	DriverEntry
 			dw		$00E0			; Speed = SLOW + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
-			str		'xHDD1'
+			str		'SCCxHD1'
 			dw		$8001			; Slot 1, doesn't need Slot HW
 			dw		$0001			; Unit #
 			dw		$000D			; Version Development
@@ -105,7 +106,7 @@ DIB1
 			adrl	DriverEntry
 			dw		$00E0			; Speed = SLOW + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
-			str		'xHDD2'
+			str		'SCCxHD2'
 			dw		$8001			; Slot 1, doesn't need Slot HW
 			dw		$0002			; Unit #
 			dw		$000D			; Version Development
@@ -120,7 +121,7 @@ DriverEntry mx %00
 			bcs		:error_rtl
 
 			phk
-			plb
+			plb 	; needed so (jmp,x) will load from this bank
 
 			asl
 			tax
@@ -158,100 +159,6 @@ Driver_Status mx %00
 Driver_Control mx %00
 
 
-
-
-:MoveE0Driver
-			; Copy E0Driver
-			clc
-			xce
-			rep		#$30
-			ldx		#E0DriverBin1-ToE0Driver+E0DriverBin2
-			ldy		#E0Driver
-			lda		#E0DriverEnd-E0Driver-1
-			mvn		E0DriverBin1, E0Driver
-			ldx		#E0DriverBin2
-			ldy		#ToE0Driver
-			lda		#E0DriverBin1-ToE0Driver-1
-			mvn		E0DriverBin2, ToE0Driver
-			;phk
-			;plb
-
-			lda		$BF10			;Get 'null' E0Driver address
-			ldy		#2
-:FindSlot	cmp		$BF10,y
-			bne		:NotEmpty
-			cmp		$BF20,y
-			beq		:GotSlot
-:NotEmpty	iny
-			iny
-			cpy		#$10
-			bcc		:FindSlot
-
-			ldy		#2				;All slots filled. Overwrite slot 1 devices
-:GotSlot			
-			lda		#ToE0Driver
-			sta		$BF10,y
-			sta		$BF20,y
-
-			phy
-			
-			sep		#$30
-			tya
-			ora		#$10			;Set Drive 2 (hi) bit
-			xba						;Save in high byte
-			tya						;Set Slot,Drive 1 in low byte
-			rep		#$20
-			asl						;Shift *8 to finish slot*16
-			asl
-			asl
-			
-			ldy		P8DevCnt
-			sta		P8DevLst+1,Y
-			iny
-			iny
-			sty		P8DevCnt
-
-			sec
-			xce
-			mx		%11
-			
-			lda		IoRomIn	; Disable LC
-
-			lda		#StrSlot
-			ldy		#>StrSlot
-			jsr		RomStrOut
-			pla
-			lsr
-			jsr		$FDE5
-Exit
-			tsc
-			cmp		#$fc
-			bcc		:GotBasic
-:Quit
-			jsr		P8Mli	; $BF00
-			db		P8CmdQuit
-			dw		:QuitParms
-:QuitParms
-			db		4
-			ds		7
-:GotBasic
-			rts
-
-StrSlot
-			asc		'Modem xHD in Slot ',00
-*-------------------------------------------------
-E0DriverBin2
-			org		$00d7a0
-ToE0Driver
-			ldx		#0
-			clc
-			xce
-			jsl		>E0Driver
-E0DriverReturn			
-			xce
-			sec
-			xce
-			rts
 CmdHdr		;asc		"E"
 CurCmd		db		0
 HdrBlk		dw		0
@@ -260,10 +167,7 @@ HdrCopy		ds		4-1
 ;TempDate	ds		4
 HdrCopyCksum dw		1
 			
-			
 *-------------------------------------------------
-E0DriverBin1
-			org		$e0bd00
 
 E0Driver
 			jmp		(GSCmd,x)
@@ -292,23 +196,6 @@ xHdClient
 			bne		:InitSCC
 
 :ConfigOK
-
-			do		0
-			phx
-			ldal	$227fff
-			tax
-			lda		ZpDrvrCmd
-			stal	$228000,x
-			lda		ZpDrvrBlk
-			stal	$228100,x
-			lda		ZpDrvrBlk+1
-			stal	$228200,x
-			inx
-			txa
-			stal	$227fff
-			plx
-			fin
-			
 			lda		ZpDrvrCmd
 			beq		:DoStatus		;0=status
 			dec
@@ -370,34 +257,6 @@ ReadBlock
 			dey
 			bpl		:ErrChk
 			
-		fin
-
-		do	0
-			jsr		ReadOneByte
-			cmp		#"E"
-			bne		ReadError
-			jsr		ReadOneByte
-			cmp		CurCmd
-			bne		ReadError
-			jsr		ReadOneByte
-			cmp		ZpDrvrBlk
-			bne		ReadError
-			jsr		ReadOneByte
-			cmp		ZpDrvrBlk+1
-			bne		ReadError
-			jsr		ReadOneByte
-			sta		TempDate
-			jsr		ReadOneByte
-			sta		TempDate+1
-			jsr		ReadOneByte
-			sta		TempDate+2
-			jsr		ReadOneByte
-			sta		TempDate+3
-			jsr		ReadOneByte
-			lda		ZpChecksum
-			bne		ReadError
-		
-			stz		ZpChecksum
 		fin
 
 			rep		#$21
@@ -475,31 +334,6 @@ WriteBlock
 			dey
 			bpl		:ErrChk
 			
-		fin
-
-		do	0
-;			jsr		ReadOneByte
-;			bcc		WriteError
-;			cmp		#"E"
-;			bne		WriteError
-			jsr		ReadOneByte
-			bcc		WriteError
-			cmp		CurCmd			;Write
-			bne		WriteError
-			jsr		ReadOneByte		;Block low
-			bcc		WriteError
-			cmp		ZpDrvrBlk
-			bne		WriteError
-			jsr		ReadOneByte		;Block high
-			bcc		WriteError
-			cmp		ZpDrvrBlk+1
-			bne		WriteError
-			lda		ZpPageNum		;Restore block ZpChecksum
-			sta		ZpChecksum
-			jsr		ReadOneByte		;Block data checksum
-			bcc		WriteError
-			lda		ZpChecksum
-			bne		WriteError
 		fin
 		
 			tsb		TxtLight
@@ -615,154 +449,4 @@ ClearRx
 E0DriverEnd
 
 *-------------------------------------------------
-			do		0
-			org		$2ec
-			dsk		SccBoot1
 
-sta_di		mac		; sta (]1)
-			db		$92,]1&$ff
-			eom
-			
-			;org		$60
-			mx		%11
-BootInitScc
-			;pea		#$0300
-			;pld
-			jsr		BootInitScc1
-			dec		InitMOD+1 ;&$ff
-			stz		SccDataMod ;&$ff
-BootInitScc1
-			ldx		#BootstrapDataEnd-BootstrapData-1
-InitSccLoop
-			lda		BootstrapData,x ;&$ff,x
-InitMOD
-			sta		IoSccCmdA
-			dex
-			bpl		InitSccLoop
-
-BootStrap
-			clc
-			xce
-			rep		#$30
-			pea		#$0300
-			pld
-:Respond			
-:WaitSend
-			lda		(pIoSccCmdB&$ff)
-			ora		#$2020!$ffff
-			inc
-			bne		:WaitSend
-
-			;Send 'GS' packet header
-			lda		PacketHdr&$ff
-			sta_di	pIoSccDataB		;sta	(pIoSccDataB&$ff)
-
-			;Get 'GS' response from server
-			jsr		BootGetWord
-			cmp		PacketHdr&$ff
-			bne		:WaitSend			;If server didn't respond, then echo packet header, then retry
-			
-:ReadCmd
-			;Read xfer word length (0=exit)
-			jsr		BootGetWord
-			beq		:Exit
-			tax							;word length
-
-			;Read bank & page of xfer dest
-			jsr		BootGetWord
-			sta		pDest+1&$ff
-
-			;Read byte offset of xfer dest
-			jsr		BootGetWord
-			tay
-
-:ReadWord
-			jsr		BootGetWord
-:DestMOD
-			sta		[pDest&$ff],y
-			iny
-			iny
-			dex
-			bne		:ReadWord
-			bra		:Respond
-
-:Exit
-			;Push last xfer bank/page on stack and jump to Adr+1
-			pei		pDest+1&$ff
-			phk
-			rtl
-
-
-BootGetWord
-			phx
-			ldx		#1000			;P8Timeout duration
-:Loop
-			dex
-			bmi		:P8Timeout
-			lda		(pIoSccCmdB&$ff)
-			ora		#$2121!$ffff
-			inc
-			bne		:Loop
-:P8Timeout
-			plx
-			lda		(pIoSccDataB&$ff)
-			sta_di	pIoSccDataB		;sta	(pIoSccDataB&$ff)
-			
-			rts
-
-PacketHdr
-			dw		'GS'
-pIoSccCmdB
-			dw		IoSccCmdB
-pIoSccDataB
-			dw		IoSccDataB
-
-
-BootstrapData
-			; Read last-to-first
-			;db		%00000000, 15	;15: no interrupts
-			db		%01101010, 5	; 5: DTR enabled; Tx on
-			db		%11000001, 3	; 3: 8 data bits, Rx on
-			;db		%00000000, 14	;14: no loopback
-pDest
-SccDataMod
-			db		%10000000, 11	;11: external clock
-			db		%01100010, 5	; 5: DTR on, 8 data bits, no break, Tx off, RTS off
-			db		%11000000, 3	; 3: 8 data bits, auto enables off, Rx off
-			db		%01000100, 4	; 4: x16 clock, 1 stop, no parity
-BootstrapDataEnd
-			fin
-*-------------------------------------------------
-
-			do		0
-			org		$300
-Begin
-			pea		#*&$ff00
-			pld
-			lda		(:ptr&$ff)
-			lda		(:ptr&$ff),y
-			lda		[:ptr&$ff],y
-
-			; lda works, why do these fail?
-			;adc		(:ptr&$ff)
-			;and		(:ptr&$ff)
-			;cmp		(:ptr&$ff)
-			;eor		(:ptr&$ff)
-			;ora		(:ptr&$ff)
-			;sbc		(:ptr&$ff)
-			;sta		(:ptr&$ff)
-:ptr
-			dw		$2000
-
-KeyClr equ $e0c010
-			lda		>KeyClr
-			lda		|KeyClr
-			lda		<KeyClr
-			lda		KeyClr&$ff
-			sta		>KeyClr
-			sta		|KeyClr
-			sta		<KeyClr
-			sta		KeyClr&$ff
-			fin
-
-*-------------------------------------------------
