@@ -22,7 +22,7 @@ maxDRIVES	equ		2
 			aux		$0102			; Active + GSOS Driver + Max 2 Device
 			rel						; OMF Code
 
-			dsk		xHD.driver
+			dsk		xHD.gsos
 
 
 *------------------------------------------------------------------------------
