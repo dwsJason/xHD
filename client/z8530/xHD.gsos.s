@@ -30,6 +30,19 @@ maxDRIVES	equ		2
 
 *------------------------------------------------------------------------------
 
+; $C022 TBCOLOR		(could use as RAM), 1 byte / must restore, could be ugly
+; $C037 DMAREG		; maybe gets trashed during DMA, need to test to see
+					; if the CPU can R/W
+; $C03E SOUNDADRL	; DOC RAM Address, could change during interrupts
+; $C03F SOUNDADRH
+; $C040  ; Test this, reserved for expansion
+
+;$C026 = key micro data reg
+;$C033 = clock data reg
+;$C03A/B = SCC data regs
+
+*------------------------------------------------------------------------------
+
 nullptr		equ		0
 
 ; Block Driver ZP Defines
