@@ -17,12 +17,13 @@
 * 
 *==============================================================================
 			lst		off
-										h
+
 
 maxDRIVES	equ		2
+JUMP_TABLE_SIZE equ 9				; GSOS Drive Jump Table Size
 
 			typ		$BB				; DVR -  Apple IIgs Device Driver File
-			aux		$0102			; Active + GSOS Driver + Max 2 Device
+;			aux		$0102			; Active + GSOS Driver + Max 2 Device
 			rel						; OMF Code
 
 			dsk		xHD.gsos
@@ -31,15 +32,13 @@ maxDRIVES	equ		2
 *------------------------------------------------------------------------------
 
 ; $C022 TBCOLOR		(could use as RAM), 1 byte / must restore, could be ugly
+; $C033 = clock data reg  ; seems to work
 ; $C037 DMAREG		; maybe gets trashed during DMA, need to test to see
 					; if the CPU can R/W
 ; $C03E SOUNDADRL	; DOC RAM Address, could change during interrupts
 ; $C03F SOUNDADRH
-; $C040  ; Test this, reserved for expansion
 
-;$C026 = key micro data reg
-;$C033 = clock data reg
-;$C03A/B = SCC data regs
+; $C03A/B = SCC data regs (maybe if in right mode)
 
 *------------------------------------------------------------------------------
 
@@ -51,7 +50,7 @@ deviceNum	equ		$0
 callNum		equ		$2
 bufferPtr	equ		$4
 requestCount equ	$8
-trasnferCount equ	$C
+transferCount equ	$C
 blockNum	equ		$10
 blockSize	equ		$14
 fstNum		equ		$16
@@ -60,12 +59,16 @@ cachePriority equ	$1A
 cachePointer equ	$1C
 dibPointer	equ		$20
 
+; Driver Status
+statusListPtr equ	$4
+statusCode equ		$16
+
 ;
 ; $$JGA TODO, fix these 
 ;
 ;ZpPageNum	=		$3a
 ;ZpChecksum	=		$3b
-;ZpReadEnd	=		$3c
+ZpReadEnd	=		$c03e	; use the SOUNDADRL+SOUNDADRH
 ;ZpTemp		=		$3e
 ;
 ;ZpDrvrCmd	=		$42
@@ -73,7 +76,7 @@ dibPointer	equ		$20
 ;ZpDrvrBufPtr =		$44
 ;ZpDrvrBlk	=		$46
 ;
-;P8ErrIoErr	=		$27
+P8ErrIoErr	=		$27
 ;
 
 ;
@@ -115,9 +118,12 @@ FirstDIB
 DIB0
 			adrl	DIB1			; Pointer to next DIB
 			adrl	DriverEntry
-			dw		$00E0			; Speed = SLOW + Block + Read + Write
+			dw		$03E0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
 			str		'SCCxHD1'
+			asc		'        '
+			asc		'        '
+			asc		'        '
 			dw		$8001			; Slot 1, doesn't need Slot HW
 			dw		$0001			; Unit #
 			dw		$000D			; Version Development
@@ -130,9 +136,12 @@ DIB0
 DIB1
 			adrl	nullptr			; Pointer to the next DIB
 			adrl	DriverEntry
-			dw		$00E0			; Speed = SLOW + Block + Read + Write
+			dw		$03E0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
 			str		'SCCxHD2'
+			asc		'        '
+			asc		'        '
+			asc		'        '
 			dw		$8001			; Slot 1, doesn't need Slot HW
 			dw		$0002			; Unit #
 			dw		$000D			; Version Development
@@ -143,6 +152,12 @@ DIB1
 			dw		$0000			; DIB DevNum
 
 DriverEntry mx %00
+
+			;bra		DriverEntry
+			nop
+			nop
+			nop
+
 			cmp		#JUMP_TABLE_SIZE
 			bcs		:error_rtl
 
@@ -171,12 +186,16 @@ DriverEntry mx %00
 *------------------------------------------------------------------------------
 
 Driver_Startup mx %00
+			; A=0
+			; c=0
+			rtl
+
 Driver_Open mx %00
 Driver_Close mx %00
 Driver_Shutdown mx %00
 Driver_Flush mx %00
 			lda		#0
-			clc
+			; c=0
 			rtl
 
 *------------------------------------------------------------------------------
@@ -191,6 +210,18 @@ Driver_Flush mx %00
 ;
 
 Driver_Read mx %00
+
+			;bra	Driver_Read
+			nop
+			nop
+			nop
+
+			;stz		<transferCount
+			;stz		<transferCount+2
+			;lda		#$11
+			;sec
+			;rtl
+;----------------------------------
 
 ;sBlockNum   = 3
 ;sBlockCount = 1
@@ -218,9 +249,13 @@ Driver_Read mx %00
 
 ]readloop	
 		    phx						  ; preserve number of blocks to xfer
+			
 			jsr		ReadBlock
 
 			plx
+
+			bcc		:error
+
 			dex
 			bne		]readloop
 
@@ -234,12 +269,18 @@ Driver_Read mx %00
 			; c = 0
 			lda		#0
 			rtl
-
+:error  	
+			rep		#$30
+			sec
+			lda 	#1
+			rtl
 
 *------------------------------------------------------------------------------
 
 Driver_Write mx %00
-			lda		#1
+			stz		<transferCount
+			stz		<transferCount+2
+			lda		#$11
 			sec
 			rtl
 
@@ -250,6 +291,11 @@ Driver_Write mx %00
 ; $53 Parameter out of range
 ;
 Driver_Status mx %00
+;			stz		<transferCount
+;			stz		<transferCount+2
+;			lda		#$11
+;			sec
+;			rtl
 
 			lda		<statusCode
 			cmp		#5
@@ -273,29 +319,66 @@ Driver_Status mx %00
 
 :GetDeviceStatus
 
+			lda		#2
+			sta		<transferCount
+			stz		<transferCount+2
+
+			lda		#$0010  	  ; #$0014  	; +Disk in Drive + readonly
+			sta		[statusListPtr]
+
+			lda		<requestCount
+			cmp		#6
+			bcc		:doneGetDStatus
+
+			lda		#$0006
+			sta		<transferCount
+
+			; Copy in the number of blocks
+
+			ldy		#2
+			lda		#$FFFF
+			sta		[statusListPtr],y
+			iny
+			iny
+			lda		#$0000
+			sta		[statusListPtr],y
+
+:doneGetDStatus
+			; a = 0
+			; c = 0
+			lda		#0     				; GetConfigParameters
+			clc
+			rtl
+
 :GetConfigParameters
 :GetWaitStatus
 			lda		#2
 			sta		<transferCount
 			stz		<transferCount+2
-
-			lda		#0     				; GetConfigParameters
-			sta		[statusListPtr]  	; GetWaitStatus
-			; a = 0
-			; c = 0
+			lda		#0
+			sta		[statusListPtr]
 			rtl
 
 
-
 :GetFormatOptions
-:GetParitionMap
+:GetPartitionMap
 			stz		<transferCount
 			stz		<transferCount+2
+			; c = 0
 			lda		#0
+;			sec
+;			lda		#1
 			rtl
 
 
 Driver_Control mx %00
+
+			;bra		Driver_Control
+			nop
+			;ldx		#1
+			nop
+			nop
+
 			lda		#1
 			sec
 			rtl
@@ -386,23 +469,27 @@ ReadBlock
 			ora		#$30
 			sta		>TxtLight
 
-			;ldx		ZpDrvrBlk
+			;ldx		ZpDrvrBlk  ; better already be in there
 			;stx		HdrBlk
 			jsr		ClearRx
 
 			phy
 			jsr		SendCmd
-			ply
 
 			lda		#0		; ZpChecksum
 
 			ldy		#HdrCopy
 			ldx		#HdrCopy+5-1
-			;stx		ZpReadEnd
-			;phk
-			;plb
+
+			phb
+			phk
+			plb
 
 			jsr		ReadBytes
+
+			ply
+			plb
+
 			bcc		ReadError
 
 			cmp		#0		; ZpChecksum
@@ -415,14 +502,15 @@ ReadBlock
 			dex
 			bpl		:ErrChk
 			
-
 			rep		#$21
-			ldy		ZpDrvrBufPtr
+			mx		%00
+			;ldy		ZpDrvrBufPtr
 			tya
 			adc		#$200
-			sta		ZpReadEnd
+			tax		;sta  	<ZpReadEnd
 			lda		#0
 			sep		#$20
+			mx		%10
 			jsr		ReadBytes
 			bcc		ReadError
 
@@ -446,60 +534,83 @@ ReadError
 			;lda		#0
 			;tsb		TxtLight
 
-			lda		#P8ErrIoErr
+			;lda	#P8ErrIoErr
 			sec
 			pld
 			rts
 
 
 *-------------------------------------------------
-			mx		%11
+; DB = Target Block Address Bank
+;  Y = Pointer to Target Block Address
+; CurCmd, already 2 = write drive 1, or 4 = write drive 2
+; DP = need to preserve
+; HdrBlk, already has the 16 bit block number
+;
+			mx		%10
 WriteBlock
-			rep		#$10
-			xba						;ah=0
+			phd 		  			; preserve DP
+			pea		#$C000
+			pld						; DP onto IO
+
 			lda		#$17
-			stal	TxtLight
-			ldx		ZpDrvrBlk
-			stx		HdrBlk
+			sta		>TxtLight
+
+			;phb
+			;phk
+			;plb
+
+			; This better be setup before call
+			;ldx		ZpDrvrBlk
+			;stx		|HdrBlk
+
 			jsr		ClearRx
 			jsr		SendCmd
-			stz		ZpChecksum
 
-			ldy		ZpDrvrBufPtr
-			sty		ZpReadEnd
-			inc		ZpReadEnd+1
-			inc		ZpReadEnd+1		;Send 2x pages = 512 bytes
+			rep		#$31
+			mx		%00
+			tya
+			adc		#$200
+			;sta		<ZpReadEnd
+			tax
+			sep		#$20
+			mx		%10
+
+			lda 	#0				;stz ZpChecksum
 			jsr		WriteBytes
 
-			sta		ZpPageNum		;Save block checksum
-
-			ldy		#ZpChecksum
-			sty		ZpReadEnd
-			jsr		WriteBytes
-
-		do	1
-			ldy		#HdrCopy
-			ldx		#HdrCopy+5-1
-;			ldx		#HdrCopy+9
-			stx		ZpReadEnd
-			jsr		ReadBytes
-			bcc		ReadError
-
-			cmp		ZpPageNum		;block ZpChecksum
-			bne		ReadError
-			
-			ldy		#2
-:ErrChk		lda		CmdHdr,y
-			cmp		HdrCopy,y
-			bne		ReadError
-			dey
-			bpl		:ErrChk
-			
-		fin
-		
-			tsb		TxtLight
-
-			sep		#$10
+;			phy
+;			pha		;;sta		ZpPageNum		;Save block checksum
+;
+;
+;			; send checksum
+;			ldy 	#ZpChecksum
+;			tyx									; ZpReadEnd
+;			jsr		WriteBytes
+;
+;		do	1
+;			ldy		#HdrCopy
+;			ldx		#HdrCopy+5-1
+;;			ldx		#HdrCopy+9
+;			stx		ZpReadEnd
+;			jsr		ReadBytes
+;			bcc		ReadError
+;
+;			cmp		ZpPageNum		;block ZpChecksum
+;			bne		ReadError
+;			
+;			ldy		#2
+;:ErrChk		lda		CmdHdr,y
+;			cmp		HdrCopy,y
+;			bne		ReadError   											    
+;			dey
+;			bpl		:ErrChk
+;			
+;		fin
+;		
+;			tsb		TxtLight
+;
+;			sep		#$10
 			clc
 			rtl
 
@@ -521,8 +632,8 @@ SendCmd
 
 			inc		<$c034 			; Border Color
 
-			lda		#^CmdHdr
-			pha
+			;#^CmdHdr
+			phk
 			plb
 
 			ldy		#CmdHdr
@@ -532,7 +643,7 @@ SendCmd
 			jsr		WriteBytes
 			sta		|HdrChecksum
 
-			jsr		WriteBytes
+			jsr		WriteBytes   	; writes just 1 more byte, the cksum
 
 			lda		<$c034
 			dec
@@ -546,14 +657,15 @@ SendCmd
 ;  Checksum in A
 ;  B in source Bank
 ;  Y index to source data
+;  X index to end of data
 ;
 			mx		%10
 WriteBytes
-			phx						;End Read
+			stx		<ZpReadEnd		;End Read
 			pha						;Checksum
+			clc
 :WriteByte
 			ldx		#$0				;Init timeout
-			clc
 :Loop
 			inx						;P8Timeout++
 			bmi		:Exit
@@ -569,11 +681,11 @@ WriteBytes
 			sta		1,s				; ZpChecksum ;Update cksum
 			
 			iny						; write index
-			cpy		2,s				; EndRead
+			cpy		<ZpReadEnd		; EndRead
 			bcc		:WriteByte
 :Exit
 			pla						; checksum in A
-			plx
+			ldx		<ZpReadEnd
 			rts
 			
 *-------------------------------------------------
@@ -583,6 +695,8 @@ WriteBytes
 			mx		%10
 ReadOneByte
 			pha						;CheckSum
+			clc
+
 			ldx		#0				;Init Timeout
 :Loop
 			inx
@@ -603,8 +717,9 @@ ReadOneByte
 *-------------------------------------------------
 			mx		%10
 ReadBytes
-			phx						;EndRead
+			stx		<ZpReadEnd		;EndRead
 			pha						;Checksum
+			clc
 :ReadByte
 			ldx		#0				;Init timeout
 :Loop
@@ -621,11 +736,11 @@ ReadBytes
 			sta		1,s				;<ZpChecksum ;Update cksum
 			
 			iny
-			cpy		2,s				;ZpReadEnd
+			cpy		<ZpReadEnd
 			bcc		:ReadByte
 :Exit		
 			pla 					; checksum
-			plx 					; EndRead
+			ldx		<ZpReadEnd		; EndRead
 			rts
 
 *-------------------------------------------------
