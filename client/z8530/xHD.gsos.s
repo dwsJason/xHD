@@ -432,11 +432,12 @@ InitSCC		mx		%10
 			beq		:ConfigOK		;If not then SCC is set up by firmware,
 									; so reset it
 			bit		<$c030
-			ldx		#-SccInitLen
+			ldx		#0
 :InitSCC	
-			lda		>SccInitTblEnd-$100,x
+			lda		>SccInitTbl,x
 			sta		<IoSccCmdB
 			inx
+			cpx		#SccInitLen
 			bne		:InitSCC
 
 :ConfigOK
