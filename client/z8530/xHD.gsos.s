@@ -79,6 +79,8 @@ ZpReadEnd	=		$c03e	; use the SOUNDADRL+SOUNDADRH
 P8ErrIoErr	=		$27
 ;
 
+SET_DISKSW EQU $01FC90
+
 ;
 ; Status Indicator on the Text Page
 ;
@@ -97,36 +99,46 @@ IoSccDataA	=		$C03B
 Header		mx %00
 			da		FirstDIB-Header
 			dw		maxDRIVES
-			da		ConfigurationList0-Header
-			da		ConfigurationList1-Header
+			da		nullptr		; nullptr ok, if you have no config data
+			da		nullptr
 
-;
-; $$JGA TODO - Support Configuration, for now empty
-;
-ConfigurationList0
-			dw		0	; Live Configuration
-			dw		0	; Default Configuration
-
-ConfigurationList1
-			dw		0	; Live Configuration
-			dw		0	; Default Configuration
+*			da		ConfigurationList0-Header
+*			da		ConfigurationList1-Header
+*
+*;
+*; $$JGA TODO - Support Configuration, for now empty
+*;
+*ConfigurationList0
+*			dw		0	; Live Configuration
+*			dw		0	; Default Configuration
+*
+*ConfigurationList1
+*			dw		0	; Live Configuration
+*			dw		0	; Default Configuration
 
 ;
 ; Device Information Blocks
 ;
+
+;devCHAR = $83EC ; default characteristics
+devCHAR = $03E0 ; default characteristics
+devSLOT = $8001
+devVER  = $100D ;  1.0 Development
+
+
 FirstDIB
 DIB0
 			adrl	DIB1			; Pointer to next DIB
 			adrl	DriverEntry
-			dw		$03E0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
+			dw		devCHAR ;$03A0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
-			str		'SCCxHD1'
+			str		'SCC.HD1'		; Pro Tip, no lowercase in these strings!
 			asc		'        '
 			asc		'        '
 			asc		'        '
-			dw		$8001			; Slot 1, doesn't need Slot HW
+			dw		devSLOT			; Slot 1, doesn't need Slot HW
 			dw		$0001			; Unit #
-			dw		$000D			; Version Development
+			dw		devVER			; Version Development
 			dw		$0013			; Device ID = Generic HDD
 			dw		$0000			; Head Link
 			dw		$0000			; Forward Link
@@ -136,15 +148,15 @@ DIB0
 DIB1
 			adrl	nullptr			; Pointer to the next DIB
 			adrl	DriverEntry
-			dw		$03E0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
+			dw		devCHAR  ;$03A0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
-			str		'SCCxHD2'
+			str		'SCC.HD2'       ; Pro Tip, no lowercase in these strings! 
 			asc		'        '
 			asc		'        '
 			asc		'        '
-			dw		$8001			; Slot 1, doesn't need Slot HW
+			dw		devSLOT			; Slot 1, doesn't need Slot HW
 			dw		$0002			; Unit #
-			dw		$000D			; Version Development
+			dw		devVER			; Version Development
 			dw		$0013			; Device ID = Generic HDD
 			dw		$0000			; Head Link
 			dw		$0000			; Forward Link
@@ -153,7 +165,8 @@ DIB1
 
 DriverEntry mx %00
 
-			;bra		DriverEntry
+;			bra		DriverEntry
+
 			nop
 			nop
 			nop
@@ -180,15 +193,11 @@ DriverEntry mx %00
 			da		Driver_Shutdown
 
 :error_rtl
+			; c=1
 			lda 	#32		; Brutal Deluxe Returns this, invalid Driver Call
 			rtl
 
 *------------------------------------------------------------------------------
-
-Driver_Startup mx %00
-			; A=0
-			; c=0
-			rtl
 
 Driver_Open mx %00
 Driver_Close mx %00
@@ -196,6 +205,8 @@ Driver_Shutdown mx %00
 Driver_Flush mx %00
 			lda		#0
 			; c=0
+Driver_Startup mx %00
+			; A=0
 			rtl
 
 *------------------------------------------------------------------------------
@@ -211,10 +222,9 @@ Driver_Flush mx %00
 
 Driver_Read mx %00
 
-			;bra	Driver_Read
-			nop
-			nop
-			nop
+			;bra		Driver_Read
+			;nop
+			;nop
 
 			;stz		<transferCount
 			;stz		<transferCount+2
@@ -229,14 +239,17 @@ Driver_Read mx %00
 			lda		<blockNum		  ; current block number on the stack
 			sta		|HdrBlk			  ; packet header, block #		
 
-			lda		<requestCount+2
+			lda		<requestCount+1
 			lsr
 			tax					      ; number of blocks to transfer
 
 			sep #$20
 			mx  %10
 
-			lda		<deviceNum
+			ldy		#$30		; UnitNum
+
+			;lda		<deviceNum ; This is GSOS Device num, not what I want
+			lda		[dibPointer],y ; volume 1 or 2
 			asl
 			inc		; 3=drive 1, 5=drive2
 			sta		|CurCmd
@@ -254,7 +267,7 @@ Driver_Read mx %00
 
 			plx
 
-			bcc		:error
+			bcs		:error
 
 			dex
 			bne		]readloop
@@ -262,7 +275,8 @@ Driver_Read mx %00
 			rep		#$31
 			mx		%00
 
-			stz		<transferCount
+			lda		<requestCount
+			sta		<transferCount
 			lda		<requestCount+2
 			sta		<transferCount+2
 
@@ -271,6 +285,10 @@ Driver_Read mx %00
 			rtl
 :error  	
 			rep		#$30
+
+			stz		<transferCount
+			stz		<transferCount+2
+
 			sec
 			lda 	#1
 			rtl
@@ -278,6 +296,8 @@ Driver_Read mx %00
 *------------------------------------------------------------------------------
 
 Driver_Write mx %00
+			bra		Driver_Write
+			nop
 			stz		<transferCount
 			stz		<transferCount+2
 			lda		#$11
@@ -291,11 +311,6 @@ Driver_Write mx %00
 ; $53 Parameter out of range
 ;
 Driver_Status mx %00
-;			stz		<transferCount
-;			stz		<transferCount+2
-;			lda		#$11
-;			sec
-;			rtl
 
 			lda		<statusCode
 			cmp		#5
@@ -319,12 +334,24 @@ Driver_Status mx %00
 
 :GetDeviceStatus
 
+
+
 			lda		#2
 			sta		<transferCount
 			stz		<transferCount+2
 
-			lda		#$0010  	  ; #$0014  	; +Disk in Drive + readonly
+;:s			lda		#$0011
+			lda		#$0014  	; +Disk in Drive + readonly
+			;lda		#$0115  	; +modified +Disk in Drive + readonly + switched
 			sta		[statusListPtr]
+
+;:b			jsl		SET_DISKSW
+;			lda		#$eaea
+;			sta 	|:b
+;			sta		|:b+2
+;			lda		#$0010
+;			sta		|:s+1
+
 
 			lda		<requestCount
 			cmp		#6
@@ -334,7 +361,7 @@ Driver_Status mx %00
 			sta		<transferCount
 
 			; Copy in the number of blocks
-
+			
 			ldy		#2
 			lda		#$FFFF
 			sta		[statusListPtr],y
@@ -366,16 +393,14 @@ Driver_Status mx %00
 			stz		<transferCount+2
 			; c = 0
 			lda		#0
-;			sec
-;			lda		#1
 			rtl
 
 
 Driver_Control mx %00
 
-			;bra		Driver_Control
+			bra		Driver_Control
 			nop
-			;ldx		#1
+			ldx		#1
 			nop
 			nop
 

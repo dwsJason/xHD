@@ -9,6 +9,7 @@
 *----------------------------------------------	
 	asm xHD.gsos.s
 	ds 0            ; padding
+;	knd #$1100      ; kind
 	knd #$1000      ; kind
 	ali None		; alignment
 	lna xHD.gsos	; load name
