@@ -445,7 +445,10 @@ InitSCC		mx		%10
 
 ;230k baud
 SccInitTbl
-			db		4,	%01000100	; 4: x16 clock, 1 stop, no parity
+			db		4,	%01000100	; 4: x16 clock, 1 stop, no parity, 230400
+; Back of the envelope math suggests 1Mhz is not fast enough for these speeds
+;			db		4,	%10000100	; 4: x32 clock, 1 stop, no parity, 460800
+;			db		4,	%11000100	; 4: x64 clock, 1 stop, no parity, 921600
 			db		3,	%11000000	; 3: 8 data bits, auto enables off, Rx off
 			db		5,	%01100010	; 5: DTR on, 8 data bits, no break, Tx off, RTS off
 			db		11,	%00000000	;11: external clock
