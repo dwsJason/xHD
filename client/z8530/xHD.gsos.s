@@ -483,6 +483,9 @@ SccInitLen	=		SccInitTblEnd-SccInitTbl
 			mx		%10
 ReadBlock
 			phd						; preserve DP
+			php
+			sei
+
 			pea		#$C000
 			pld			            ; DP on IO
 
@@ -513,18 +516,18 @@ ReadBlock
 
 			jsr		ReadBytes
 
-			ply
 			plb
+			ply
 
-			bcc		ReadError
+			bcc		ReadError0
 
 			cmp		#0		; ZpChecksum
-			bne		ReadError
+			bne		ReadError1
 			
 			ldx		#2
 :ErrChk		lda		>CmdHdr,x
 			cmp		>HdrCopy,x
-			bne		ReadError
+			bne		ReadError2
 			dex
 			bpl		:ErrChk
 			
@@ -538,32 +541,96 @@ ReadBlock
 			sep		#$20
 			mx		%10
 			jsr		ReadBytes
-			bcc		ReadError
+			bcc		ReadError3
 
 			jsr		ReadOneByte		;Read checksum
-			bcc		ReadError		;Err if P8Timeout
+			bcc		ReadError4		;Err if P8Timeout
 			cmp		#0				;Chksum==0?
-			bne		ReadError		;Err if bad chksum
+			bne		ReadError5		;Err if bad chksum
 
 			ora		>TxtLight
 			sta		>TxtLight
 
-			clc
+			plp
 			pld
+			clc
 			rts
 
 *-------------------------------------------------
-			mx		%10
-ReadError
+ReadError0  mx		%10
 			jsr		ClearRx
 
-			;lda		#0
-			;tsb		TxtLight
+			lda		#0
+			sta  	<$C034
 
 			;lda	#P8ErrIoErr
-			sec
+			plp
 			pld
+			sec
 			rts
+
+ReadError1	mx		%10
+			jsr		ClearRx
+
+			lda		#1
+			sta  	<$C034
+
+			;lda	#P8ErrIoErr
+			plp
+			pld
+			sec
+			rts
+
+ReadError2  mx		%10
+			jsr		ClearRx
+
+			lda		#2
+			sta  	<$C034
+
+			;lda	#P8ErrIoErr
+			plp
+			pld
+			sec
+			rts
+
+ReadError3	mx		%10
+			jsr		ClearRx
+
+			lda		#3
+			sta  	<$C034
+
+			;lda	#P8ErrIoErr
+			plp
+			pld
+			sec
+			rts
+
+ReadError4  mx		%10
+			jsr		ClearRx
+
+			lda		#4
+			sta  	<$C034
+
+			;lda	#P8ErrIoErr
+			plp
+			pld
+			sec
+			rts
+
+ReadError5	mx		%10
+			jsr		ClearRx
+
+			lda		#5
+			sta  	<$C034
+
+			;lda	#P8ErrIoErr
+			plp
+			pld
+			sec
+			rts
+
+
+
 
 
 *-------------------------------------------------
@@ -694,7 +761,7 @@ WriteBytes
 			ldx		#$0				;Init timeout
 :Loop
 			inx						;P8Timeout++
-			bmi		:Exit
+			beq		:Exit
 			lda		<IoSccCmdB		;Reg 0
 			and		#%00100100		;Chk bit 5 (ready to send) & bit 2 (HW handshake)
 			eor		#%00100100
@@ -726,7 +793,7 @@ ReadOneByte
 			ldx		#0				;Init Timeout
 :Loop
 			inx
-			bmi		:Exit
+			beq		:Exit
 
 			lda		<IoSccCmdB		;Chk reg 0 bit 0
 			lsr
@@ -750,7 +817,7 @@ ReadBytes
 			ldx		#0				;Init timeout
 :Loop
 			inx						;P8Timeout++
-			bmi		:Exit
+			beq		:Exit
 			lda		<IoSccCmdB		;Chk reg 0 bit 0
 			lsr
 			bcc		:Loop
