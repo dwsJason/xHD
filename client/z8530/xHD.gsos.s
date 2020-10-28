@@ -243,7 +243,7 @@ Driver_Read mx %00
 			lsr
 			tax					      ; number of blocks to transfer
 
-			sep #$20
+			sep 	#$20
 			mx  %10
 
 			ldy		#$30		; UnitNum
@@ -296,12 +296,71 @@ Driver_Read mx %00
 *------------------------------------------------------------------------------
 
 Driver_Write mx %00
-			bra		Driver_Write
-			nop
+;			bra		Driver_Write
+;			nop
+;			nop
+			
 			stz		<transferCount
 			stz		<transferCount+2
 			lda		#$11
 			sec
+			rtl
+			
+;-------------------------------------------------
+
+			lda		<blockNum  			; current block number
+			sta		|HdrBlk 			; packet header, block #
+			
+			lda		<requestCount+1
+			lsr
+			tax							; number of blocks to transfer
+			
+			sep		#$20
+			mx	%10
+			
+			ldy		#$30				; UnitNum (DIB Offset)
+			lda		[dibPointer],y		; volume 1 or 2
+			asl
+			; 2 = drive 1, 4 = drive 2
+			sta		|CurCmd
+			
+			lda		<bufferPtr+2
+			pha
+			plb 		  				; Current DB is Source of Data
+			
+			ldy		<bufferPtr			; Y is Address to copy from
+			
+]writeloop
+			phx							; preserve num blocks
+			
+			jsr		WriteBlock
+			
+			plx
+			
+			bcs		:error
+			
+			dex
+			bne		]writeloop
+			
+			rep		#$31
+			mx		%00
+			
+			lda		<requestCount
+			sta		<transferCount
+			lda		<requestCount+2
+			sta		<transferCount+2
+			
+			; c = 0
+			lda		#0
+			rtl
+:error
+			rep		#$30
+			
+			stz		<transferCount
+			stz		<transferCount+2
+			
+			sec
+			lda		#1
 			rtl
 
 *------------------------------------------------------------------------------
@@ -479,7 +538,7 @@ SccInitLen	=		SccInitTblEnd-SccInitTbl
 *-------------------------------------------------
 ; DB = Target Block Address Bank
 ;  Y = Pointer to Target Block Address
-; CurCmd, already 3 = write drive 1, or 5 = write drive 2
+; CurCmd, already 3 = read drive 1, or 5 = read drive 2
 ; DP = need to preserve
 ; HdrBlk, already has the 16 bit block number
 ;
@@ -646,28 +705,29 @@ ReadError5	mx		%10
 			mx		%10
 WriteBlock
 			phd 		  			; preserve DP
+			php
+			sei
+			
 			pea		#$C000
 			pld						; DP onto IO
 
 			lda		#$17
 			sta		>TxtLight
 
-			;phb
-			;phk
-			;plb
-
 			; This better be setup before call
 			;ldx		ZpDrvrBlk
 			;stx		|HdrBlk
 
 			jsr		ClearRx
+			
+			phy
 			jsr		SendCmd
 
 			rep		#$31
 			mx		%00
+			ply
 			tya
-			adc		#$200
-			;sta		<ZpReadEnd
+			adc		#$200			; End of Block
 			tax
 			sep		#$20
 			mx		%10
@@ -675,51 +735,65 @@ WriteBlock
 			lda 	#0				;stz ZpChecksum
 			jsr		WriteBytes
 
-;			phy
-;			pha		;;sta		ZpPageNum		;Save block checksum
-;
-;
-;			; send checksum
-;			ldy 	#ZpChecksum
-;			tyx									; ZpReadEnd
-;			jsr		WriteBytes
-;
-;		do	1
-;			ldy		#HdrCopy
-;			ldx		#HdrCopy+5-1
-;;			ldx		#HdrCopy+9
-;			stx		ZpReadEnd
-;			jsr		ReadBytes
-;			bcc		ReadError
-;
-;			cmp		ZpPageNum		;block ZpChecksum
-;			bne		ReadError
-;			
-;			ldy		#2
-;:ErrChk		lda		CmdHdr,y
-;			cmp		HdrCopy,y
-;			bne		ReadError   											    
-;			dey
-;			bpl		:ErrChk
-;			
-;		fin
-;		
-;			tsb		TxtLight
-;
-;			sep		#$10
-			clc
-			rtl
+			phy
+			phb
+			pha		; Block Checksum
+			
+			; A = checksum
+			; send checksum
+			jsr		WriteOneByte
+			
+			phk
+			plb
+			
+			ldy		#HdrCopy		; start
+			ldx		#HdrCopy+5-1	; end
+			lda		#0  			; crc
+			
+			jsr		ReadBytes
+			bcs		:sofarsogood
+:err			
+			pla
+			plb
+			ply
+			bra		WriteError
+
+:sofarsogood
+			dey
+			lda		|0,y
+			cmp		1,s
+			bne		:err
+
+			ldy		#2
+:ErrChk		lda		|CmdHdr,y
+			cmp		|HdrCopy,y
+			bne		:err   											    
+			dey
+			bpl		:ErrChk
+		
+			sta		>TxtLight
+			
+			pla 	; block checksum
+			plb 	; data bank
+			ply		; read address	
+
+			plp 	; restore interrupt status
+			pld 	; restore D Page
+			clc 	; c=0, no error
+			rts
 
 *-------------------------------------------------
 			mx		%10
 WriteError
 			jsr		ClearRx
-			lda		#0
-			tsb		TxtLight
-			sep		#$10
-			lda		#P8ErrIoErr
+;			lda		#0
+;			tsb		TxtLight
+;			sep		#$10
+;			lda		#P8ErrIoErr
+			plp
+			pld
 			sec
-			rtl
+			rts
 
 *-------------------------------------------------
 			mx		%10
@@ -748,6 +822,33 @@ SendCmd
 
 			plb
 			rts
+			
+*-------------------------------------------------
+*  Return A in A
+* 
+			mx		%10
+WriteOneByte
+			pha						;Checksum
+			clc
+:WriteByte
+			ldx		#$0				;Init timeout
+:Loop
+			inx						;P8Timeout++
+			beq		:Exit
+			lda		<IoSccCmdB		;Reg 0
+			and		#%00100100		;Chk bit 5 (ready to send) & bit 2 (HW handshake)
+			eor		#%00100100
+			bne		:Loop
+
+			pla						;Get byte
+			sta		<IoSccDataB		;Tx byte
+			
+			sec
+			rts
+:Exit
+			pla
+			rts
+
 			
 *-------------------------------------------------
 ;  Checksum in A
