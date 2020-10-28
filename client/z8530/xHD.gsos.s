@@ -120,7 +120,6 @@ Header		mx %00
 ; Device Information Blocks
 ;
 
-;devCHAR = $83EC ; default characteristics
 devCHAR = $03E0 ; default characteristics
 devSLOT = $8001
 devVER  = $100D ;  1.0 Development
@@ -130,7 +129,7 @@ FirstDIB
 DIB0
 			adrl	DIB1			; Pointer to next DIB
 			adrl	DriverEntry
-			dw		devCHAR ;$03A0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
+			dw		devCHAR			; Speed = FAST + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
 			str		'SCC.HD1'		; Pro Tip, no lowercase in these strings!
 			asc		'        '
@@ -148,7 +147,7 @@ DIB0
 DIB1
 			adrl	nullptr			; Pointer to the next DIB
 			adrl	DriverEntry
-			dw		devCHAR  ;$03A0			;dw		$80E0			; Speed = SLOW + Block + Read + Write
+			dw		devCHAR			; Speed = FAST + Block + Read + Write
 			adrl	$0000FFFF  		; Blocks on Device
 			str		'SCC.HD2'       ; Pro Tip, no lowercase in these strings! 
 			asc		'        '
@@ -300,11 +299,11 @@ Driver_Write mx %00
 ;			nop
 ;			nop
 			
-			stz		<transferCount
-			stz		<transferCount+2
-			lda		#$11
-			sec
-			rtl
+;			stz		<transferCount
+;			stz		<transferCount+2
+;			lda		#$11
+;			sec
+;			rtl
 			
 ;-------------------------------------------------
 
@@ -393,29 +392,21 @@ Driver_Status mx %00
 
 :GetDeviceStatus
 
-
-
+			; Going to transfer at least 2 bytes
+			; $$TODO, double check that at least 2 were requested
 			lda		#2
 			sta		<transferCount
 			stz		<transferCount+2
 
-;:s			lda		#$0011
-			lda		#$0014  	; +Disk in Drive + readonly
-			;lda		#$0115  	; +modified +Disk in Drive + readonly + switched
+;			lda		#$0014  	; +Disk in Drive + readonly
+			lda		#$0010  	; +Disk in Drive
 			sta		[statusListPtr]
-
-;:b			jsl		SET_DISKSW
-;			lda		#$eaea
-;			sta 	|:b
-;			sta		|:b+2
-;			lda		#$0010
-;			sta		|:s+1
-
 
 			lda		<requestCount
 			cmp		#6
 			bcc		:doneGetDStatus
 
+			; 6 or more requested, so include blocks count
 			lda		#$0006
 			sta		<transferCount
 
@@ -438,6 +429,7 @@ Driver_Status mx %00
 
 :GetConfigParameters
 :GetWaitStatus
+			;$$TODO, double check the requestCount 
 			lda		#2
 			sta		<transferCount
 			stz		<transferCount+2
@@ -454,16 +446,11 @@ Driver_Status mx %00
 			lda		#0
 			rtl
 
+*------------------------------------------------------------------------------
 
 Driver_Control mx %00
 
-			bra		Driver_Control
-			nop
-			ldx		#1
-			nop
-			nop
-
-			lda		#1
+			lda		#$21
 			sec
 			rtl
 
@@ -710,6 +697,8 @@ WriteBlock
 			
 			pea		#$C000
 			pld						; DP onto IO
+
+			jsr		InitSCC
 
 			lda		#$17
 			sta		>TxtLight
