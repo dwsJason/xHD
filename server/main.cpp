@@ -6,6 +6,9 @@
 //  Copyright (c) 2016 JB.
 //
 
+// Allow Assert in Release
+#undef NDEBUG
+
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
@@ -237,8 +240,10 @@ int main(int argc, char *argv[])
 
 					// See if the port can be opened and configured
 					eResult = sp_open(pPort, SP_MODE_READ_WRITE);
+
 					if (eResult == SP_OK)
 						eResult = sp_set_config(pPort, pSerialConfig);
+
 					if (eResult != SP_OK)
 					{
 						// Port is not valid
@@ -351,7 +356,7 @@ int main(int argc, char *argv[])
 				else // Write block
 				{
 					static unsigned char auBlockBuf[512 + 1];
-					int iReadLen = sp_blocking_read(pPort, auBlockBuf, 512 + 1, 30/*ms timeout*/);
+					int iReadLen = sp_blocking_read(pPort, auBlockBuf, 512 + 1, 60/*ms timeout*/);
 					if (iReadLen != 512 + 1)
 					{
 						printf("Err: ReadLen=%d\n", iReadLen);
