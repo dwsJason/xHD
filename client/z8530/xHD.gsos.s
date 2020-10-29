@@ -589,7 +589,7 @@ ReadBlock
 			lda		#0
 			sep		#$20
 			mx		%10
-			jsr		ReadBytes
+			jsr		ReadBytes_SpanBank
 			bcc		ReadError3
 
 			jsr		ReadOneByte		;Read checksum
@@ -722,7 +722,7 @@ WriteBlock
 			mx		%10
 
 			lda 	#0				;stz ZpChecksum
-			jsr		WriteBytes
+			jsr		WriteBytes_SpanBank
 
 			phy
 			phb
@@ -867,8 +867,55 @@ WriteBytes
 			sta		1,s				; ZpChecksum ;Update cksum
 			
 			iny						; write index
+
 			cpy		<ZpReadEnd		; EndRead
 			bcc		:WriteByte
+:Exit
+			pla						; checksum in A
+			ldx		<ZpReadEnd
+			rts
+
+*-------------------------------------------------
+;  Checksum in A
+;  B in source Bank
+;  Y index to source data
+;  X index to end of data
+;
+			mx		%10
+WriteBytes_SpanBank
+			stx		<ZpReadEnd		;End Read
+			pha						;Checksum
+:WriteByte
+			clc
+			ldx		#$0				;Init timeout
+:Loop
+			inx						;P8Timeout++
+			beq		:Exit
+			lda		<IoSccCmdB		;Reg 0
+			and		#%00100100		;Chk bit 5 (ready to send) & bit 2 (HW handshake)
+			eor		#%00100100
+			bne		:Loop
+
+			lda		|0,y			;Get byte
+			sta		<IoSccDataB		;Tx byte
+
+			eor		1,s				; ZpChecksum
+			sta		1,s				; ZpChecksum ;Update cksum
+			
+			iny						; write index
+			bne		:NoWrap
+
+			; Data Bank Change
+			phb 	; 3
+			pla		; 4
+			inc		; 2
+			pha 	; 3
+			plb 	; 4
+
+:NoWrap
+			cpy		<ZpReadEnd		; EndRead
+			bne		:WriteByte
+			sec
 :Exit
 			pla						; checksum in A
 			ldx		<ZpReadEnd
@@ -924,6 +971,46 @@ ReadBytes
 			iny
 			cpy		<ZpReadEnd
 			bcc		:ReadByte
+:Exit		
+			pla 					; checksum
+			ldx		<ZpReadEnd		; EndRead
+			rts
+
+*-------------------------------------------------
+			mx		%10
+ReadBytes_SpanBank
+			stx		<ZpReadEnd		;EndRead
+			pha						;Checksum
+:ReadByte
+			clc
+			ldx		#0				;Init timeout
+:Loop
+			inx						;P8Timeout++
+			beq		:Exit
+			lda		<IoSccCmdB		;Chk reg 0 bit 0
+			lsr
+			bcc		:Loop
+
+			lda		<IoSccDataB		;Byte received
+			sta		|0,y			;Store it
+			
+			eor		1,s				;<ZpChecksum
+			sta		1,s				;<ZpChecksum ;Update cksum
+			
+			iny
+			bne		:NoWrap
+
+			; Data Bank Change
+			phb
+			pla
+			inc
+			pha
+			plb
+
+:NoWrap
+			cpy		<ZpReadEnd
+			bne		:ReadByte
+			sec
 :Exit		
 			pla 					; checksum
 			ldx		<ZpReadEnd		; EndRead
