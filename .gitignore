@@ -6,3 +6,6 @@ prodos.po
 *.vpw
 *.vpwhist
 *.vtg
+server/vcxproj/.vs/
+*.user
+server/vcxproj/x64/
